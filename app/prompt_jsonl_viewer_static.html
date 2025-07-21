@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Prompt JSONL/JSON Viewer (Static)</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <style>
+    body { background: #fff; color: #222; font-family: sans-serif; margin: 0; }
+    textarea { background: #222; color: #fff; font-family: monospace; width: 100%; min-height: 240px; margin-bottom: 16px; resize: vertical; }
+    .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+    button, input[type="file"] { font-size: 1rem; margin-right: 8px; }
+    label { font-weight: bold; }
+    nav { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const FIM_PREFIX = '<FIM_PREFIX>';
+    const FIM_SUFFIX = '<FIM_SUFFIX>';
+    const FIM_MIDDLE = '<FIM_MIDDLE>';
+
+    function extractParts(prompt, completions) {
+      let prefix = '', suffix = '', completion = '';
+      if (prompt) {
+        const prefixIdx = prompt.indexOf(FIM_PREFIX);
+        const suffixIdx = prompt.indexOf(FIM_SUFFIX);
+        const middleIdx = prompt.indexOf(FIM_MIDDLE);
+        if (prefixIdx !== -1 && suffixIdx !== -1 && middleIdx !== -1) {
+          prefix = prompt.substring(prefixIdx + FIM_PREFIX.length, suffixIdx);
+          suffix = prompt.substring(suffixIdx + FIM_SUFFIX.length, middleIdx);
+          completion = prompt.substring(middleIdx + FIM_MIDDLE.length);
+        } else if (middleIdx !== -1) {
+          completion = prompt.substring(middleIdx + FIM_MIDDLE.length);
+        }
+      }
+      if (typeof completions === 'string') {
+        const middleIdx = completions.indexOf(FIM_MIDDLE);
+        if (middleIdx !== -1) {
+          completion = completions.substring(middleIdx + FIM_MIDDLE.length);
+        } else {
+          completion = completions;
+        }
+      } else if (completions && Array.isArray(completions) && completions.length > 0) {
+        if (typeof completions[0] === 'string') {
+          const middleIdx = completions[0].indexOf(FIM_MIDDLE);
+          if (middleIdx !== -1) {
+            completion = completions[0].substring(middleIdx + FIM_MIDDLE.length);
+          } else {
+            completion = completions[0];
+          }
+        } else if (typeof completions[0] === 'object' && completions[0].text) {
+          const text = completions[0].text;
+          const middleIdx = text.indexOf(FIM_MIDDLE);
+          if (middleIdx !== -1) {
+            completion = text.substring(middleIdx + FIM_MIDDLE.length);
+          } else {
+            completion = text;
+          }
+        }
+      }
+      return { prefix, suffix, completion };
+    }
+
+    function PromptJsonlViewer() {
+      const [lines, setLines] = React.useState([]);
+      const [otherCompletions, setOtherCompletions] = React.useState([]);
+      const [thirdCompletions, setThirdCompletions] = React.useState([]);
+      const [current, setCurrent] = React.useState(0);
+      const [mainFile, setMainFile] = React.useState(null);
+      const [otherFile, setOtherFile] = React.useState(null);
+      const [thirdFile, setThirdFile] = React.useState(null);
+      const [mainFileName, setMainFileName] = React.useState('');
+      const [otherFileName, setOtherFileName] = React.useState('');
+      const [thirdFileName, setThirdFileName] = React.useState('');
+      const [ready, setReady] = React.useState(false);
+
+      const handleMainUpload = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        setMainFile(file);
+        setMainFileName(file.name);
+      };
+      const handleOtherUpload = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        setOtherFile(file);
+        setOtherFileName(file.name);
+      };
+      const handleThirdUpload = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        setThirdFile(file);
+        setThirdFileName(file.name);
+      };
+      const handleCompare = () => {
+        if (!mainFile || !otherFile || !thirdFile) return;
+        // Read main file
+        const mainReader = new FileReader();
+        mainReader.onload = (evt) => {
+          try {
+            const text = evt.target.result;
+            let loadedLines = [];
+            if (mainFile.name.endsWith('.json')) {
+              loadedLines = JSON.parse(text);
+            } else {
+              loadedLines = text.split('\n').filter(Boolean).map(line => {
+                try {
+                  return JSON.parse(line);
+                } catch (e) {
+                  return null;
+                }
+              }).filter(Boolean);
+            }
+            setLines(loadedLines);
+            setCurrent(0);
+            // Now read other file
+            const otherReader = new FileReader();
+            otherReader.onload = (evt2) => {
+              try {
+                const text2 = evt2.target.result;
+                let loaded = [];
+                if (otherFile.name.endsWith('.json')) {
+                  loaded = JSON.parse(text2);
+                } else {
+                  loaded = text2.split('\n').filter(Boolean).map(line => {
+                    try {
+                      return JSON.parse(line);
+                    } catch (e) {
+                      return null;
+                    }
+                  }).filter(Boolean);
+                }
+                setOtherCompletions(loaded);
+                // Now read third file
+                const thirdReader = new FileReader();
+                thirdReader.onload = (evt3) => {
+                  try {
+                    const text3 = evt3.target.result;
+                    let loaded3 = [];
+                    if (thirdFile.name.endsWith('.json')) {
+                      loaded3 = JSON.parse(text3);
+                    } else {
+                      loaded3 = text3.split('\n').filter(Boolean).map(line => {
+                        try {
+                          return JSON.parse(line);
+                        } catch (e) {
+                          return null;
+                        }
+                      }).filter(Boolean);
+                    }
+                    setThirdCompletions(loaded3);
+                    setReady(true);
+                  } catch (e) {
+                    setThirdCompletions([]);
+                    setReady(true);
+                  }
+                };
+                if (thirdFile) {
+                  thirdReader.readAsText(thirdFile);
+                }
+              } catch (e) {
+                setOtherCompletions([]);
+                setThirdCompletions([]);
+                setReady(true);
+              }
+            };
+            if (otherFile) {
+              otherReader.readAsText(otherFile);
+            }
+          } catch (e) {
+            setLines([]);
+            setOtherCompletions([]);
+            setThirdCompletions([]);
+            setReady(true);
+          }
+        };
+        mainReader.readAsText(mainFile);
+      };
+
+      const currentLine = lines[current] || {};
+      const { prompt, output, completions } = currentLine;
+      const { prefix, suffix, completion } = extractParts(prompt, completions);
+
+      if (!ready) {
+        return (
+          <div className="container">
+            <h2>Prompt JSONL/JSON Viewer (Static)</h2>
+            <nav>
+              <span style={{ color: '#1976d2', fontWeight: 'bold' }}>Static Mode</span>
+            </nav>
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ fontWeight: 600 }}>Main File:</span>
+              <input type="file" accept=".json,.jsonl" onChange={handleMainUpload} />
+              {mainFileName && <span style={{ marginLeft: 8, color: '#1976d2' }}>{mainFileName}</span>}
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ fontWeight: 600 }}>Other Completions File:</span>
+              <input type="file" accept=".json,.jsonl" onChange={handleOtherUpload} />
+              {otherFileName && <span style={{ marginLeft: 8, color: '#1976d2' }}>{otherFileName}</span>}
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ fontWeight: 600 }}>Third Completions File:</span>
+              <input type="file" accept=".json,.jsonl" onChange={handleThirdUpload} />
+              {thirdFileName && <span style={{ marginLeft: 8, color: '#1976d2' }}>{thirdFileName}</span>}
+            </div>
+            <button onClick={handleCompare} disabled={!(mainFile && otherFile && thirdFile)} style={{ fontWeight: 700, fontSize: '1.1em', padding: '8px 24px' }}>Compare</button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="container">
+          <h2>Prompt JSONL/JSON Viewer (Static)</h2>
+          <nav>
+            <span style={{ color: '#1976d2', fontWeight: 'bold' }}>Static Mode</span>
+          </nav>
+          <div style={{ marginBottom: 16 }}>
+            <button onClick={() => setCurrent(c => Math.max(c - 1, 0))} disabled={current === 0}>Previous</button>
+            <span style={{ margin: '0 12px' }}>{current + 1} / {lines.length}</span>
+            <button onClick={() => setCurrent(c => Math.min(c + 1, lines.length - 1))} disabled={current === lines.length - 1}>Next</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+            <div style={{ width: '100%', minWidth: 325, alignSelf: 'flex-start' }}>
+              <label>Prefix</label>
+              <textarea value={prefix ? `\n${prefix}\n` : ''} readOnly style={{ width: '100%', minHeight: 240, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+            </div>
+            <div style={{ width: '100%', minWidth: 325, alignSelf: 'flex-start' }}>
+              <label>Suffix</label>
+              <textarea value={suffix ? `\n${suffix}\n` : ''} readOnly style={{ width: '100%', minHeight: 240, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 32, width: '100%' }}>
+              <div style={{ flex: 1, minWidth: 250, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                <label>GroundTruth Output</label>
+                <textarea value={output !== undefined ? output : ''} readOnly style={{ width: '100%', minHeight: 480, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 250, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                <label style={{ textAlign: 'center', width: '100%' }}>Starcoder2 Predictions</label>
+                <textarea value={completion !== undefined ? completion : ''} readOnly style={{ width: '100%', minHeight: 480, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 250, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                <label style={{ textAlign: 'center', width: '100%' }}>Other Completions</label>
+                <textarea value={
+                  otherCompletions.length > current && otherCompletions[current] && typeof otherCompletions[current].completions === 'string'
+                    ? otherCompletions[current].completions
+                    : (otherCompletions.length > current && otherCompletions[current] && otherCompletions[current].completions
+                        ? JSON.stringify(otherCompletions[current].completions, null, 2)
+                        : '')
+                } readOnly style={{ width: '100%', minHeight: 480, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 250, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                <label style={{ textAlign: 'center', width: '100%' }}>Third Completions</label>
+                <textarea value={
+                  thirdCompletions.length > current && thirdCompletions[current] && typeof thirdCompletions[current].completions === 'string'
+                    ? thirdCompletions[current].completions
+                    : (thirdCompletions.length > current && thirdCompletions[current] && thirdCompletions[current].completions
+                        ? JSON.stringify(thirdCompletions[current].completions, null, 2)
+                        : '')
+                } readOnly style={{ width: '100%', minHeight: 480, fontFamily: 'monospace', background: '#222', color: '#fff', whiteSpace: 'pre-wrap', resize: 'vertical', marginBottom: 16 }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<PromptJsonlViewer />);
+  </script>
+</body>
+</html>

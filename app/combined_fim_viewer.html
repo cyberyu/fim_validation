@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Combined Results FIM Viewer</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <style>
+    body { background: #fff; color: #222; font-family: sans-serif; margin: 0; }
+    textarea { background: #222; color: #fff; font-family: monospace; width: 100%; min-height: 80px; margin-bottom: 12px; resize: vertical; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    button, input[type="file"] { font-size: 1rem; margin-right: 8px; }
+    label { font-weight: bold; }
+    nav { margin-bottom: 16px; }
+    .row { display: flex; gap: 24px; width: 100%; }
+    .col { flex: 1; min-width: 200px; display: flex; flex-direction: column; align-items: stretch; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const FIM_PREFIX = '<FIM_PREFIX>';
+    const FIM_SUFFIX = '<FIM_SUFFIX>';
+    const FIM_MIDDLE = '<FIM_MIDDLE>';
+
+    function robustParse(text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === 'object') return [parsed];
+      } catch (e) {
+        return text.split('\n').filter(Boolean).map(line => {
+          try { return JSON.parse(line); } catch { return null; }
+        }).filter(Boolean);
+      }
+      return [];
+    }
+
+    function extractFIMParts(prompt) {
+      let prefix = '', middle = '', suffix = '';
+      if (typeof prompt === 'string') {
+        const preIdx = prompt.indexOf(FIM_PREFIX);
+        const sufIdx = prompt.indexOf(FIM_SUFFIX);
+        const midIdx = prompt.indexOf(FIM_MIDDLE);
+        if (preIdx !== -1 && sufIdx !== -1 && midIdx !== -1) {
+          prefix = prompt.substring(preIdx + FIM_PREFIX.length, sufIdx);
+          suffix = prompt.substring(sufIdx + FIM_SUFFIX.length, midIdx);
+          middle = prompt.substring(midIdx + FIM_MIDDLE.length);
+        } else if (midIdx !== -1) {
+          middle = prompt.substring(midIdx + FIM_MIDDLE.length);
+        }
+      }
+      return { prefix, middle, suffix };
+    }
+
+    function getCompletions(obj) {
+      // Return all completion/completions fields as array of strings
+      let results = [];
+      if (!obj) return results;
+      if (typeof obj.completion === 'string') results.push(obj.completion);
+      if (typeof obj.completions === 'string') results.push(obj.completions);
+      if (Array.isArray(obj.completions)) {
+        obj.completions.forEach(c => {
+          if (typeof c === 'string') results.push(c);
+          else if (c && typeof c.text === 'string') results.push(c.text);
+        });
+      }
+      return results;
+    }
+
+    function CombinedFimViewer() {
+      const [lines, setLines] = React.useState([]);
+      const [current, setCurrent] = React.useState(0);
+      const [mainFile, setMainFile] = React.useState(null);
+      const [mainFileName, setMainFileName] = React.useState('');
+      const [ready, setReady] = React.useState(false);
+      const [error, setError] = React.useState('');
+
+      const handleMainUpload = (e) => {
+        setError('');
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        setMainFile(file);
+        setMainFileName(file.name);
+      };
+      const handleLoad = () => {
+        setError('');
+        if (!mainFile) return;
+        const mainReader = new FileReader();
+        mainReader.onload = (evt) => {
+          try {
+            const text = evt.target.result;
+            const loadedLines = robustParse(text);
+            if (!Array.isArray(loadedLines) || loadedLines.length === 0) {
+              setError('No valid entries found in file.');
+              setLines([]);
+              setReady(false);
+              return;
+            }
+            setLines(loadedLines);
+            setCurrent(0);
+            setReady(true);
+          } catch (e) {
+            setLines([]);
+            setError('Failed to parse file: ' + e.message);
+            setReady(false);
+          }
+        };
+        mainReader.readAsText(mainFile);
+      };
+
+      const currentLine = lines[current] || {};
+      // Dynamically get all keys (file stems)
+      const keys = Object.keys(currentLine || {});
+      // Use the first key for prompt/output, rest for completions
+      const promptObj = currentLine[keys[0]] || {};
+      const completionsObjs = keys.slice(1).map(k => currentLine[k] || {});
+      const { prefix, middle, suffix } = extractFIMParts(promptObj.prompt);
+      const output = promptObj.output || '';
+      // Gather all completions from all other entries
+      const allCompletions = completionsObjs.flatMap(getCompletions);
+
+      return (
+        <div className="container">
+          <h2>Combined Results FIM Viewer</h2>
+          <nav>
+            <span style={{ color: '#1976d2', fontWeight: 'bold' }}>Static Mode</span>
+          </nav>
+          <div style={{ marginBottom: 16 }}>
+            <span style={{ fontWeight: 600 }}>Combined Results File:</span>
+            <input type="file" accept=".json,.jsonl" onChange={handleMainUpload} />
+            {mainFileName && <span style={{ marginLeft: 8, color: '#1976d2' }}>{mainFileName}</span>}
+            <button onClick={handleLoad} disabled={!mainFile} style={{ fontWeight: 700, fontSize: '1.1em', padding: '8px 24px', marginLeft: 12 }}>Load</button>
+          </div>
+          {error && <div style={{ color: 'red', marginBottom: 16 }}>{error}</div>}
+          {ready && lines.length > 0 && (
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <button onClick={() => setCurrent(c => Math.max(c - 1, 0))} disabled={current === 0}>Previous</button>
+                <span style={{ margin: '0 12px' }}>{lines.length === 0 ? 0 : current + 1} / {lines.length}</span>
+                <button onClick={() => setCurrent(c => Math.min(c + 1, lines.length - 1))} disabled={current === lines.length - 1 || lines.length === 0}>Next</button>
+              </div>
+              <div className="row">
+                <div className="col">
+                  <label>Prefix</label>
+                  <textarea value={prefix} readOnly />
+                </div>
+                <div className="col">
+                  <label>Middle</label>
+                  <textarea value={middle} readOnly />
+                </div>
+                <div className="col">
+                  <label>Suffix</label>
+                  <textarea value={suffix} readOnly />
+                </div>
+              </div>
+              <div className="row">
+                <div className="col">
+                  <label>Output</label>
+                  <textarea value={output} readOnly />
+                </div>
+                {allCompletions.map((c, i) => (
+                  <div className="col" key={i}>
+                    <label>Completion {i+1}</label>
+                    <textarea value={c} readOnly />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<CombinedFimViewer />);
+  </script>
+</body>
+</html>
