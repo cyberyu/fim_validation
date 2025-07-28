@@ -62,18 +62,19 @@ def truncate_to_1_line(text: str) -> str:
     lines = [line for line in text.splitlines() if line.strip()]
     return lines[0] if lines else ''
 
-def evaluate_completions(df: pd.DataFrame, output_col: str = 'output_after_fim_middle', completion_col: str = 'prediction_after_fim_middle') -> Dict[str, float]:
+def truncate_to_n_lines(text: str, n: int) -> str:
+    """Extracts the first n non-empty lines from the text."""
+    if not isinstance(text, str):
+        return ''
+    lines = [line for line in text.splitlines() if line.strip()]
+    return '\n'.join(lines[:n])
+
+def evaluate_completions(df: pd.DataFrame, output_col: str = 'output_after_fim_middle', completion_col: str = 'prediction_after_fim_middle', n: int = 1) -> Dict[str, float]:
     # All metrics should use the filtered df only
     if completion_col not in df.columns or output_col not in df.columns:
         return None
-    gt = df[output_col].astype(str).str.strip()
-    pred = df[completion_col].astype(str).str.strip()
-    # Truncate prediction to first 1 line for comparison
-    pred = pred.apply(truncate_to_1_line)
-    # Show parsed ground truth and predictions line by line
-    # print("\n--- Parsed Ground Truth and Predictions ---")
-    # for i, (g, p) in enumerate(zip(gt, pred)):
-    #     print(f"[{i}] Ground Truth:\n{g}\n[{i}] Prediction:\n{p}\n---")
+    gt = df[output_col].astype(str).str.strip().apply(lambda x: truncate_to_n_lines(x, n))
+    pred = df[completion_col].astype(str).str.strip().apply(lambda x: truncate_to_n_lines(x, n))
     # Metrics (all uncommented)
     exact_matches = (gt == pred)
     accuracy = exact_matches.mean()
@@ -106,7 +107,7 @@ def find_column_case_insensitive(columns, *candidates):
             return lower_columns[cand.lower()]
     return None
 
-def evaluate_completions_data(data, output_col: str = 'output_after_fim_middle', completion_col: str = 'prediction_after_fim_middle') -> Dict[str, float]:
+def evaluate_completions_data(data, output_col: str = 'output_after_fim_middle', completion_col: str = 'prediction_after_fim_middle', n: int = 1) -> Dict[str, float]:
     """
     Accepts either a pandas DataFrame or a list of dicts (from JSON).
     Returns only the count of non-empty completions as evaluated_rows.
@@ -120,9 +121,6 @@ def evaluate_completions_data(data, output_col: str = 'output_after_fim_middle',
         df = pd.DataFrame(data)
     else:
         return None
-    completions_col_name = find_column_case_insensitive(df.columns, 'completions')
-    completion_col_name = find_column_case_insensitive(df.columns, 'completion')
-    # Use the new columns for filtering
     output_col_name = find_column_case_insensitive(df.columns, output_col)
     prediction_col_name = find_column_case_insensitive(df.columns, completion_col)
     if not prediction_col_name or not output_col_name:
@@ -131,7 +129,7 @@ def evaluate_completions_data(data, output_col: str = 'output_after_fim_middle',
     filtered_df = df[mask].copy()
     if filtered_df.empty:
         return None
-    return evaluate_completions(filtered_df, output_col, completion_col)
+    return evaluate_completions(filtered_df, output_col, completion_col, n)
 
 def extract_evaluation_results(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -171,29 +169,29 @@ def try_load_json_or_jsonl(file_path):
 def main():
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python eval_completions.py <file>")
+        print("Usage: python eval_completions.py <file> [N]")
         sys.exit(1)
     file_path = sys.argv[1]
-    # Always use new columns for parsed_tbricksnext2lines_first200.jsonl
+    N = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     output_col = 'output_after_fim_middle'
     completion_col = 'prediction_after_fim_middle'
     ext = os.path.splitext(file_path)[1].lower()
     if ext == '.csv':
         df = pd.read_csv(file_path)
         df = extract_evaluation_results(df)
-        results = evaluate_completions_data(df, output_col, completion_col)
+        results = evaluate_completions_data(df, output_col, completion_col, N)
     elif ext == '.json' or ext == '.jsonl':
         data = try_load_json_or_jsonl(file_path)
         df = pd.DataFrame(data)
         df = extract_evaluation_results(df)
-        results = evaluate_completions_data(df, output_col, completion_col)
+        results = evaluate_completions_data(df, output_col, completion_col, N)
     else:
         print(f"Unsupported file type: {ext}")
         sys.exit(1)
     if results is None:
         print(f"Required columns not found in {file_path}, skipping evaluation.")
     else:
-        print(f"Results: {results}")
+        print(f"Results for first {N} line(s): {results}")
 
 if __name__ == "__main__":
     main()
